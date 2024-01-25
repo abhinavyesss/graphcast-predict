@@ -1,0 +1,13 @@
+cdsapi==0.6.1
+Cython==3.0.6
+dm-tree==0.1.8
+Flask==2.0.2
+flask-restx==0.5.0
+gevent==21.8.0
+google-cloud-storage==2.13.0
+gunicorn==20.0.4
+isodate==0.6.0
+pymongo==3.12.1
+pysolar==0.11
+python-dotenv==0.19.2
+werkzeug==2.1.2
