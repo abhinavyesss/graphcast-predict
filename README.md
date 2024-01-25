@@ -1,3 +1,9 @@
+Steps:
+1. Create the docker iamge.
+2. Run the docker image, creating a container.
+3. While the docker image is running, open another terminal and enter the docker container.
+4. Execute "python3 prediction.py".
+
 Command to build docker image:
 
 ```
