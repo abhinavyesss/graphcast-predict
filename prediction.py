@@ -56,7 +56,7 @@ gap = 6
 predictions_steps = 4
 watts_to_joules = 3600
 first_prediction = datetime.datetime(2024, 1, 1, 18, 0)
-lat_range = range(-180, 181, 1)
+lat_range = range(-90, 91, 1)
 lon_range = range(0, 360, 1)
 
 class AssignCoordinates:
