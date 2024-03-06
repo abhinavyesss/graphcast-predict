@@ -3,6 +3,7 @@
 import cdsapi
 import datetime
 import functools
+from google.cloud import storage
 from graphcast import autoregressive, casting, checkpoint, data_utils as du, graphcast, normalization, rollout
 import haiku as hk
 import isodate
@@ -18,6 +19,9 @@ from typing import Dict
 import xarray
 
 client = cdsapi.Client()
+
+gcs_client = storage.Client.create_anonymous_client()
+gcs_bucket = gcs_client.get_bucket("dm_graphcast")
 
 singlelevelfields = [
                         '10m_u_component_of_wind',
@@ -82,7 +86,7 @@ class AssignCoordinates:
                     'land_sea_mask': ['lon', 'lat'],
                 }
 
-with open(r'model/params/GraphCast_small - ERA5 1979-2015 - resolution 1.0 - pressure levels 13 - mesh 2to5 - precipitation input and output.npz', 'rb') as model:
+with gcs_bucket.blob(f'params/GraphCast_small - ERA5 1979-2015 - resolution 1.0 - pressure levels 13 - mesh 2to5 - precipitation input and output.npz').open('rb') as model:
     ckpt = checkpoint.load(model, graphcast.CheckPoint)
     params = ckpt.params
     state = {}
@@ -295,7 +299,7 @@ def formatData(data:pd.DataFrame) -> pd.DataFrame:
 def getTargets(dt, data:pd.DataFrame):
 
     lat, lon, levels, batch = sorted(data.index.get_level_values('lat').unique().tolist()), sorted(data.index.get_level_values('lon').unique().tolist()), sorted(data.index.get_level_values('level').unique().tolist()), data.index.get_level_values('batch').unique().tolist()
-    time = [deltaTime(dt, hours = days * gap) for days in range(4)]
+    time = [deltaTime(dt, hours = days * gap) for days in range(predictions_steps)]
     target = xarray.Dataset({field: (['lat', 'lon', 'level', 'time'], nans(len(lat), len(lon), len(levels), len(time))) for field in predictionFields}, coords = {'lat': lat, 'lon': lon, 'level': levels, 'time': time, 'batch': batch})
 
     return target.to_dataframe()
