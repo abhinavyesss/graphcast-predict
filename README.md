@@ -1,5 +1,5 @@
 # Steps:
-1. Create the docker iamge.
+1. Create the docker image.
 2. Run the docker image, creating a container.
 3. While the docker image is running, open another terminal and enter the docker container.
 4. Execute "python3 prediction.py".
@@ -29,3 +29,5 @@ docker exec -it graphcast /bin/bash
 ```
 python3 prediction.py
 ```
+
+![giphy](https://github.com/user-attachments/assets/2267d22f-7e27-4a14-be6d-0ac7d9af6667)
