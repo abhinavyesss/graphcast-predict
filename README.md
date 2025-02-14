@@ -29,5 +29,3 @@ docker exec -it graphcast /bin/bash
 ```
 python3 prediction.py
 ```
-
-![giphy](https://github.com/user-attachments/assets/2267d22f-7e27-4a14-be6d-0ac7d9af6667)
