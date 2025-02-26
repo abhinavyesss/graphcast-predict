@@ -9,38 +9,42 @@ import haiku as hk
 import isodate
 import jax
 import math
+import netCDF4
 import numpy as np
+import os
 import pandas as pd
 from pysolar.radiation import get_radiation_direct
 from pysolar.solar import get_altitude
 import pytz
-import scipy
 from typing import Dict
 import xarray
+import zipfile
+
+from constants import Constants
 
 client = cdsapi.Client()
 
 gcs_client = storage.Client.create_anonymous_client()
-gcs_bucket = gcs_client.get_bucket("dm_graphcast")
+gcs_bucket = gcs_client.get_bucket('dm_graphcast')
 
-singlelevelfields = [
-                        '10m_u_component_of_wind',
-                        '10m_v_component_of_wind',
-                        '2m_temperature',
-                        'geopotential',
-                        'land_sea_mask',
-                        'mean_sea_level_pressure',
-                        'toa_incident_solar_radiation',
-                        'total_precipitation'
-                    ]
-pressurelevelfields = [
-                        'u_component_of_wind',
-                        'v_component_of_wind',
-                        'geopotential',
-                        'specific_humidity',
-                        'temperature',
-                        'vertical_velocity'
-                    ]
+singlelevelfields = {
+                        'u10': '10m_u_component_of_wind',
+                        'v10': '10m_v_component_of_wind',
+                        't2m': '2m_temperature',
+                        'z': 'geopotential',
+                        'lsm': 'land_sea_mask',
+                        'msl': 'mean_sea_level_pressure',
+                        'tisr': 'toa_incident_solar_radiation',
+                        'tp': 'total_precipitation'
+                    }
+pressurelevelfields = {
+                        'u': 'u_component_of_wind',
+                        'v': 'v_component_of_wind',
+                        'z': 'geopotential',
+                        'q': 'specific_humidity',
+                        't': 'temperature',
+                        'w': 'vertical_velocity'
+                    }
 predictionFields = [
                         'u_component_of_wind',
                         'v_component_of_wind',
@@ -59,33 +63,34 @@ pi = math.pi
 gap = 6
 predictions_steps = 4
 watts_to_joules = 3600
-first_prediction = datetime.datetime(2024, 1, 1, 18, 0)
+first_prediction = datetime.datetime(2025, 2, 1, 18, 0)
 lat_range = range(-90, 91, 1)
 lon_range = range(0, 360, 1)
 
 class AssignCoordinates:
     
     coordinates = {
-                    '2m_temperature': ['batch', 'lon', 'lat', 'time'],
-                    'mean_sea_level_pressure': ['batch', 'lon', 'lat', 'time'],
-                    '10m_v_component_of_wind': ['batch', 'lon', 'lat', 'time'],
-                    '10m_u_component_of_wind': ['batch', 'lon', 'lat', 'time'],
-                    'total_precipitation_6hr': ['batch', 'lon', 'lat', 'time'],
-                    'temperature': ['batch', 'lon', 'lat', 'level', 'time'],
-                    'geopotential': ['batch', 'lon', 'lat', 'level', 'time'],
-                    'u_component_of_wind': ['batch', 'lon', 'lat', 'level', 'time'],
-                    'v_component_of_wind': ['batch', 'lon', 'lat', 'level', 'time'],
-                    'vertical_velocity': ['batch', 'lon', 'lat', 'level', 'time'],
-                    'specific_humidity': ['batch', 'lon', 'lat', 'level', 'time'],
-                    'toa_incident_solar_radiation': ['batch', 'lon', 'lat', 'time'],
-                    'year_progress_cos': ['batch', 'time'],
-                    'year_progress_sin': ['batch', 'time'],
-                    'day_progress_cos': ['batch', 'lon', 'time'],
-                    'day_progress_sin': ['batch', 'lon', 'time'],
-                    'geopotential_at_surface': ['lon', 'lat'],
-                    'land_sea_mask': ['lon', 'lat'],
+                    '2m_temperature': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, Constants.CDSConstants.TIME_FIELD.value],
+                    'mean_sea_level_pressure': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, Constants.CDSConstants.TIME_FIELD.value],
+                    '10m_v_component_of_wind': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, Constants.CDSConstants.TIME_FIELD.value],
+                    '10m_u_component_of_wind': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, Constants.CDSConstants.TIME_FIELD.value],
+                    'total_precipitation_6hr': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, Constants.CDSConstants.TIME_FIELD.value],
+                    'temperature': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, 'level', Constants.CDSConstants.TIME_FIELD.value],
+                    'geopotential': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, 'level', Constants.CDSConstants.TIME_FIELD.value],
+                    'u_component_of_wind': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, 'level', Constants.CDSConstants.TIME_FIELD.value],
+                    'v_component_of_wind': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, 'level', Constants.CDSConstants.TIME_FIELD.value],
+                    'vertical_velocity': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, 'level', Constants.CDSConstants.TIME_FIELD.value],
+                    'specific_humidity': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, 'level', Constants.CDSConstants.TIME_FIELD.value],
+                    'toa_incident_solar_radiation': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value, Constants.CDSConstants.TIME_FIELD.value],
+                    'year_progress_cos': ['batch', Constants.CDSConstants.TIME_FIELD.value],
+                    'year_progress_sin': ['batch', Constants.CDSConstants.TIME_FIELD.value],
+                    'day_progress_cos': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.TIME_FIELD.value],
+                    'day_progress_sin': ['batch', Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.TIME_FIELD.value],
+                    'geopotential_at_surface': [Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value],
+                    'land_sea_mask': [Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.LAT_FIELD.value],
                 }
 
+print('Connecting to dm_graphcast bucket...')
 with gcs_bucket.blob(f'params/GraphCast_small - ERA5 1979-2015 - resolution 1.0 - pressure levels 13 - mesh 2to5 - precipitation input and output.npz').open('rb') as model:
     ckpt = checkpoint.load(model, graphcast.CheckPoint)
     params = ckpt.params
@@ -93,12 +98,15 @@ with gcs_bucket.blob(f'params/GraphCast_small - ERA5 1979-2015 - resolution 1.0 
     model_config = ckpt.model_config
     task_config = ckpt.task_config
 
+print('Loading the diffs_stddev_by_level.nc file...')
 with open(r'model/stats/diffs_stddev_by_level.nc', 'rb') as f:
     diffs_stddev_by_level = xarray.load_dataset(f).compute()
 
+print('Loading the mean_by_level.nc file...')
 with open(r'model/stats/mean_by_level.nc', 'rb') as f:
     mean_by_level = xarray.load_dataset(f).compute()
 
+print('Loading the stddev_by_level.nc file...')
 with open(r'model/stats/stddev_by_level.nc', 'rb') as f:
     stddev_by_level = xarray.load_dataset(f).compute()
     
@@ -175,6 +183,32 @@ def addTimezone(dt, tz = pytz.UTC) -> datetime.datetime:
     else:
         return dt.astimezone(tz)
 
+def remove_junk_columns(df:pd.DataFrame):
+
+    for col in ['number', 'expver']:
+        if col in df.columns.values.tolist():
+            df.pop(col)
+    
+    return df
+
+def getSingleLevelValues(filename):
+
+    extract_to = filename.split('.')[0]
+    with zipfile.ZipFile(filename, 'r') as f:
+        f.extractall(extract_to)
+
+    dfs = []
+    for i in os.listdir(extract_to):
+        extension = i.split('.')[-1]
+        if extension == 'nc':
+            df = xarray.open_dataset('{}/{}'.format(extract_to, i), engine = netCDF4.__name__.lower()).to_dataframe()
+            df = remove_junk_columns(df)
+            dfs.append(df)
+
+    single_level_df = pd.concat(dfs, axis = 1)
+
+    return single_level_df
+
 # Getting the single and pressure level values.
 def getSingleAndPressureValues():
     
@@ -182,18 +216,18 @@ def getSingleAndPressureValues():
         'reanalysis-era5-single-levels',
         {
             'product_type': 'reanalysis',
-            'variable': singlelevelfields,
+            'variable': list(singlelevelfields.values()),
             'grid': '1.0/1.0',
-            'year': [2024],
+            'year': [2025],
             'month': [1],
             'day': [1],
-            'time': ['00:00', '01:00', '02:00', '03:00', '04:00', '05:00', '06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00'],
-            'format': 'netcdf'
-        },
-        'single-level.nc'
-    )'''
-    singlelevel = xarray.open_dataset('single-level.nc', engine = scipy.__name__).to_dataframe()
-    singlelevel = singlelevel.rename(columns = {col:singlelevelfields[ind] for ind, col in enumerate(singlelevel.columns.values.tolist())})
+            Constants.CDSConstants.TIME_FIELD.value: ['00:00', '01:00', '02:00', '03:00', '04:00', '05:00', '06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00'],
+            'data_format': 'netcdf',
+            'download_format': 'zip'
+        }
+    ).download('single-level.zip')'''
+    singlelevel = getSingleLevelValues('single-level.zip')
+    singlelevel = singlelevel.rename(columns = {col:singlelevelfields[col] for col in singlelevel.columns.values.tolist() if col in singlelevelfields})
     singlelevel = singlelevel.rename(columns = {'geopotential': 'geopotential_at_surface'})
 
     # Calculating the sum of the last 6 hours of rainfall.
@@ -205,19 +239,20 @@ def getSingleAndPressureValues():
         'reanalysis-era5-pressure-levels',
         {
             'product_type': 'reanalysis',
-            'variable': pressurelevelfields,
+            'variable': list(pressurelevelfields.values()),
             'grid': '1.0/1.0',
-            'year': [2024],
+            'year': [2025],
             'month': [1],
             'day': [1],
-            'time': ['06:00', '12:00'],
+            Constants.CDSConstants.TIME_FIELD.value: ['06:00', '12:00'],
             'pressure_level': pressure_levels,
-            'format': 'netcdf'
-        },
-        'pressure-level.nc'
-    )'''
-    pressurelevel = xarray.open_dataset('pressure-level.nc', engine = scipy.__name__).to_dataframe()
-    pressurelevel = pressurelevel.rename(columns = {col:pressurelevelfields[ind] for ind, col in enumerate(pressurelevel.columns.values.tolist())})
+            'data_format': 'netcdf',
+            'download_format': 'unarchived'
+        }
+    ).download('pressure-level.nc')'''
+    pressurelevel = xarray.open_dataset('pressure-level.nc', engine = netCDF4.__name__.lower()).to_dataframe()
+    pressurelevel = remove_junk_columns(pressurelevel)
+    pressurelevel = pressurelevel.rename(columns = {col:pressurelevelfields[col] for col in pressurelevel.columns.values.tolist() if col in pressurelevelfields})
 
     return singlelevel, pressurelevel
 
@@ -243,7 +278,7 @@ def addDayProgress(secs, lon:str, data:pd.DataFrame):
 
 def integrateProgress(data:pd.DataFrame):
         
-    for dt in data.index.get_level_values('time').unique():
+    for dt in data.index.get_level_values(Constants.CDSConstants.TIME_FIELD.value).unique():
         seconds_since_epoch = toDatetime(dt).timestamp()
         data = addYearProgress(seconds_since_epoch, data)
         data = addDayProgress(seconds_since_epoch, 'longitude' if 'longitude' in data.index.names else 'lon', data)
@@ -259,14 +294,14 @@ def getSolarRadiation(longitude, latitude, dt):
 
 def integrateSolarRadiation(data:pd.DataFrame):
 
-    dates = list(data.index.get_level_values('time').unique())
+    dates = list(data.index.get_level_values(Constants.CDSConstants.TIME_FIELD.value).unique())
     coords = [[lat, lon] for lat in lat_range for lon in lon_range]
     values = []
 
     for dt in dates:
-        values.extend(list(map(lambda coord:{'time': dt, 'lon': coord[1], 'lat': coord[0], 'toa_incident_solar_radiation': getSolarRadiation(coord[1], coord[0], dt)}, coords)))
+        values.extend(list(map(lambda coord:{Constants.CDSConstants.TIME_FIELD.value: dt, Constants.CDSConstants.LON_FIELD.value: coord[1], Constants.CDSConstants.LAT_FIELD.value: coord[0], 'toa_incident_solar_radiation': getSolarRadiation(coord[1], coord[0], dt)}, coords)))
 
-    values = pd.DataFrame(values).set_index(keys = ['lat', 'lon', 'time'])
+    values = pd.DataFrame(values).set_index(keys = [Constants.CDSConstants.LAT_FIELD.value, Constants.CDSConstants.LON_FIELD.value, Constants.CDSConstants.TIME_FIELD.value])
     
     return pd.merge(data, values, left_index = True, right_index = True, how = 'inner')
 
@@ -289,7 +324,7 @@ def makeXarray(data:pd.DataFrame) -> xarray.Dataset:
 
 def formatData(data:pd.DataFrame) -> pd.DataFrame:
         
-    data = data.rename_axis(index = {'latitude': 'lat', 'longitude': 'lon'})
+    data = data.rename_axis(index = {Constants.CDSConstants.LAT_FIELD.value: 'lat', Constants.CDSConstants.LON_FIELD.value: 'lon'})
     if 'batch' not in data.index.names:
         data['batch'] = 0
         data = data.set_index('batch', append = True)
@@ -298,9 +333,9 @@ def formatData(data:pd.DataFrame) -> pd.DataFrame:
 
 def getTargets(dt, data:pd.DataFrame):
 
-    lat, lon, levels, batch = sorted(data.index.get_level_values('lat').unique().tolist()), sorted(data.index.get_level_values('lon').unique().tolist()), sorted(data.index.get_level_values('level').unique().tolist()), data.index.get_level_values('batch').unique().tolist()
+    lat, lon, levels, batch = sorted(data.index.get_level_values('lat').unique().tolist()), sorted(data.index.get_level_values('lon').unique().tolist()), sorted(data.index.get_level_values('pressure_level').unique().tolist()), data.index.get_level_values('batch').unique().tolist()
     time = [deltaTime(dt, hours = days * gap) for days in range(predictions_steps)]
-    target = xarray.Dataset({field: (['lat', 'lon', 'level', 'time'], nans(len(lat), len(lon), len(levels), len(time))) for field in predictionFields}, coords = {'lat': lat, 'lon': lon, 'level': levels, 'time': time, 'batch': batch})
+    target = xarray.Dataset({field: (['lat', 'lon', 'level', Constants.CDSConstants.TIME_FIELD.value], nans(len(lat), len(lon), len(levels), len(time))) for field in predictionFields}, coords = {'lat': lat, 'lon': lon, 'level': levels, Constants.CDSConstants.TIME_FIELD.value: time, 'batch': batch})
 
     return target.to_dataframe()
 
