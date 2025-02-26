@@ -1,9 +1,10 @@
-cdsapi==0.6.1
-Cython==3.0.6
+cdsapi==0.7.5
+cfgrib==0.9.15.0
+Cython==3.0.12
 dm-tree==0.1.8
 Flask==2.0.2
 flask-restx==0.5.0
-gevent==21.8.0
+gevent==24.10.3
 google-cloud-storage==2.13.0
 gunicorn==20.0.4
 isodate==0.6.0
