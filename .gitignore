@@ -1,2 +1,13 @@
 # The CDS key.
 .cdsapirc
+
+# The stats files.
+model/*
+
+# CDS files.
+*.zip
+*.nc
+*.csv
+
+# Cache files.
+*.pyc
